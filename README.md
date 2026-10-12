@@ -2,20 +2,25 @@
 
 Custom EEPROM firmware for Macrosilicon USB video chips, adding
 host-accessible features via a mailbox protocol over the existing HID
-interface. No hardware modification required — just reflash the EEPROM.
+interface.
+
+These images could be customized, flashed to most cheap USB dongles, or used as the basis for new products.
+
+<img width="1920" height="1080" alt="MS9123 output being received by MS2107" src="https://github.com/user-attachments/assets/bb49619c-b692-4e93-a60c-a70a99612670" />
+
 
 ## Supported Chips
 
-| Chip | Function | Status | Features |
+| Chip | Function | Status | New Features |
 |------|----------|--------|----------|
-| **MS2107** | CVBS/S-Video to USB capture | Working | Signal status, image adjust, input select, GPIO, I2C master |
-| **MS9123** | USB to CVBS/S-Video display | Working | Display status, DAC control, GPIO, I2C master |
-| **MS2109** | HDMI to USB capture | Working | HDMI capture, signal detection, I2C master, GPIO, PID override |
+| **MS2107** | CVBS/S-Video to USB capture | Working | Image adjust, input select, GPIO, I2C master |
+| **MS9123** | USB to CVBS/S-Video display | Working | GPIO, I2C master |
+| **MS2109** | HDMI to USB capture | Working | GPIO, PID override, I2C master |
 
-## What's New Over Stock
+## What's "New"?
 
-The stock EEPROM firmware handles signal detection and video configuration
-but exposes no user-accessible interface. This project adds:
+The stock firmwares handle things like signal detection and video configuration
+but expose no user-accessible interface. This project adds:
 
 - **Host command mailbox** — read signal status, video parameters, and
   hardware state over USB HID without any driver changes
@@ -25,14 +30,12 @@ but exposes no user-accessible interface. This project adds:
 - **Image adjustment** (MS2107) — brightness, contrast, saturation, hue
 - **Video input switching** (MS2107) — force CVBS, S-Video, or auto-detect
 - **DAC control** (MS9123) — read/write the 10-bit video DAC
-- **Test pattern generator** — send SMPTE bars, PM5544, or solid colors
-  to the MS9123 display adapter directly via USB (no drivers needed)
 - **USB PID override** (MS2109) — customize the USB product ID at build time
 - **Editable EDID** (MS2109) — customize the HDMI EDID the source device sees
 
 ## How It Works
 
-These USB video dongles contain an 8051 microcontroller that loads firmware
+These Video ICs contain an 8051 microcontroller that loads firmware
 from an external I2C EEPROM (24C16) at boot. The mask ROM provides the base
 USB video functionality; the EEPROM firmware extends it with signal detection,
 video configuration, and interrupt handling.
@@ -226,11 +229,11 @@ The custom crt0 assembly handles bridging between conventions. The MS2109
 firmware is pure assembly and calls ROM functions directly without bridging.
 
 IRQ handlers are written in assembly on all three chips. The mask ROM's
-USB stack is sensitive to exact instruction sequences in interrupt context.
+USB stack seems to be sensitive to exact instruction sequences in interrupt context.
 
 ## License
 
-The firmware source code in this repository is original work.
+The firmware source code in this repository is original work. All copyrights remain with the original author(s). 
 
 ## Acknowledgments
 
