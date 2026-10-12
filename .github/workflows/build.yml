@@ -35,6 +35,13 @@ jobs:
         python build_eeprom.py eeprom_fw.bin eeprom_image.bin
         echo "MS2109 code size: $(wc -c < eeprom_fw.bin) bytes"
 
+    - name: Build MS2109 D7 add-on
+      run: |
+        cd ms2109/eeprom_d7
+        make clean
+        make mailbox_d7.bin
+        echo "MS2109 D7 add-on size: $(wc -c < mailbox_d7.bin) bytes"
+
     - name: Build MS9123
       run: |
         cd ms9123/eeprom
@@ -50,6 +57,7 @@ jobs:
         path: |
           ms2107/eeprom/eeprom_image.bin
           ms2109/eeprom/eeprom_image.bin
+          ms2109/eeprom_d7/mailbox_d7.bin
           ms9123/eeprom/eeprom_image.bin
 
   release:
@@ -73,6 +81,7 @@ jobs:
         cd artifacts
         mv ms2107/eeprom/eeprom_image.bin ms2107_eeprom.bin
         mv ms2109/eeprom/eeprom_image.bin ms2109_eeprom.bin
+        mv ms2109/eeprom_d7/mailbox_d7.bin ms2109_d7_mailbox.bin
         mv ms9123/eeprom/eeprom_image.bin ms9123_eeprom.bin
 
     - name: Create release
@@ -81,5 +90,6 @@ jobs:
         files: |
           artifacts/ms2107_eeprom.bin
           artifacts/ms2109_eeprom.bin
+          artifacts/ms2109_d7_mailbox.bin
           artifacts/ms9123_eeprom.bin
         generate_release_notes: true

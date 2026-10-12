@@ -24,6 +24,8 @@ def detect_chip(data):
         return "MS2107"
     elif magic == 0xA55A or magic == 0x9669:
         return "MS2109/MS9123"
+    elif magic == 0x5AA5:
+        return "MS2109 D7"
     else:
         return None
 

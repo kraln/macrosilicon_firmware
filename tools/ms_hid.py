@@ -38,10 +38,10 @@ KNOWN_USB_IDS = {
 }
 
 # XDATA[0xF800] -> chip, and the EEPROM magics that chip's ROM loads.
-# MS2109 "D7" runs a newer mask ROM; no firmware in this repo targets it yet.
+# MS2109 "D7" runs a newer mask ROM; see ms2109/eeprom_d7.
 CHIP_IDS = {
     0xA7: ("MS2109", {0xA55A, 0x9669}),
-    0xD7: ("MS2109 (D7 ROM, unsupported)", set()),
+    0xD7: ("MS2109 (D7 ROM)", {0x5AA5}),
     0xFF: ("MS2107", {0x0816, 0x3264}),
     0x00: ("MS9123", {0xA55A}),
 }
@@ -156,9 +156,9 @@ class MSDevice:
         """Write a firmware image after checking it suits the connected chip.
 
         Refuses (ValueError) if the image's magic is not one the chip's ROM
-        loads, if its checksums are wrong, or if the chip is unknown or the
-        unsupported MS2109 D7 variant, unless force=True. Verifies by reading
-        back. Returns the list of mismatching addresses (empty on success).
+        loads, if its checksums are wrong, or if the chip is unknown, unless
+        force=True. Verifies by reading back. Returns the list of
+        mismatching addresses (empty on success).
         """
         problems = check_image(self.chip_id(), image)
         if problems and not force:
@@ -203,10 +203,10 @@ def check_image(chip_id, image):
     magic = (image[0] << 8) | image[1]
     if chip_id not in CHIP_IDS:
         problems.append(f"unknown chip ID 0x{chip_id:02X} at 0xF800")
-    elif chip_id == 0xD7:
+    elif chip_id == 0xD7 and magic != 0x5AA5:
         problems.append(
-            "this is an MS2109 with the newer D7 mask ROM; the MS2109 "
-            "firmware in this repo only works on the A7 ROM (see README)")
+            "this MS2109 has the newer D7 mask ROM, which only loads "
+            "0x5AA5 images; build one with ms2109/eeprom_d7 (see README)")
     elif magic not in CHIP_IDS[chip_id][1]:
         problems.append(f"image magic 0x{magic:04X} is not loaded by "
                         f"{chip_name(chip_id)}: wrong image for this chip?")
