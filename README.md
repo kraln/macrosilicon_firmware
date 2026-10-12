@@ -61,8 +61,9 @@ The `ms_hid.py` library in `tools/` wraps the raw HID protocol.
 
 | Tool | Description |
 |------|-------------|
-| `tools/ms_hid.py` | HID communication library (XDATA/EEPROM read/write) |
+| `tools/ms_hid.py` | HID library + CLI: device detection, chip ID, EEPROM backup/flash with safety checks |
 | `tools/ms_movc_dump.py` | CODE space dump via RAM-patched MOVC handler |
+| `tools/ms2109_d7_dump.py` | CODE/EEPROM dump for the MS2109 "D7" variant (see below) |
 | `tools/ms_xdata_dump.py` | Full XDATA dump (single-byte reads) |
 | `tools/ms_eeprom_checksum.py` | EEPROM checksum calculator |
 | `tools/ms_testpattern.py` | USB display test pattern generator (SMPTE, PM5544, etc.) |
@@ -100,14 +101,16 @@ make CUSTOM_STRINGS='-DCUSTOM_USB_SERIAL="\"MySerial\""'
 
 Flash via `ms_hid.py` or any I2C programmer:
 
-```python
-from ms_hid import MSDevice
-
-with MSDevice(vid=0x534D, pid=0x2109) as d:
-    eeprom = open("eeprom_image.bin", "rb").read()
-    d.eeprom_write_block(0, eeprom)
-    # Power cycle to boot new firmware
+```bash
+python ../../tools/ms_hid.py info                     # check what's connected
+python ../../tools/ms_hid.py flash eeprom_image.bin   # then unplug/replug
 ```
+
+`flash` auto-detects the device (or takes `--vid`/`--pid`), saves a backup
+of the current EEPROM, and refuses to write an image whose magic the
+connected chip's ROM doesn't load, an image with bad checksums, or any image
+onto an unsupported chip such as the MS2109 D7 variant. It verifies by
+reading back. From Python, use `MSDevice().flash_eeprom(image)`.
 
 ## MS9123 (USB Display Adapter)
 
@@ -136,7 +139,7 @@ cd ms9123/eeprom
 make
 ```
 
-Flash the same way as MS2107 (adjust VID:PID as needed).
+Flash the same way as MS2107.
 
 ## MS2109 (HDMI Capture)
 
@@ -154,12 +157,24 @@ USB PID is configurable at build time (edit `_set_usb_pid` in crt0).
 EDID, video timing table, and register configuration are editable in
 the assembly source.
 
+### MS2109 "D7" Variant (not yet supported)
+
+Some MS2109 dongles (commonly VID `0x345F`, chip marked MS2109"S") report
+`D7.10.9A` at XDATA `0xF800` instead of `A7.10.9A`. They run a different
+mask ROM, different hook commands, and a shifted RAM layout.
+**Do not flash the MS2109 firmware from this repo onto a D7 device**
+it currently targets the A7 ROM only.
+
 ### Building and Flashing (MS2109)
 
 ```bash
 cd ms2109/eeprom
 make
+python ../../tools/ms_hid.py flash eeprom_image.bin
 ```
+
+`ms_hid.py` finds MS2109 units under either VID (`0x534D` or `0x345F`) and
+will refuse to flash a D7 unit.
 
 The MS2109 firmware is pure assembly (sdas8051 + sdld). No C compiler needed
 beyond what SDCC provides.

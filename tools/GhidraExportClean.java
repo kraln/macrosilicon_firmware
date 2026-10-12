@@ -15,7 +15,10 @@ public class GhidraExportClean extends GhidraScript {
         Listing listing = currentProgram.getListing();
         String name = currentProgram.getName().replace(".bin", "").replace(".BIN", "");
 
-        int skipAbove = 0x7020; // Skip empty ROM region
+        // Skip empty ROM region. MS2107 default; pass e.g. 0x7C03 for MS2109.
+        int skipAbove = 0x7020;
+        String[] args = getScriptArgs();
+        if (args.length > 0) skipAbove = Integer.decode(args[0]);
         int totalFuncs = 0;
         int skippedFuncs = 0;
 
@@ -71,7 +74,7 @@ public class GhidraExportClean extends GhidraScript {
         String cPath = "/tmp/ghidra_" + name + "_decompiled.c";
         PrintWriter cFile = new PrintWriter(new FileWriter(cPath));
         cFile.println("/* Ghidra decompilation of " + name + " */");
-        cFile.println("/* Actual code region: 0x0000-0x701f */");
+        cFile.printf("/* Actual code region: 0x0000-0x%04x */%n", skipAbove - 1);
         cFile.println();
 
         funcs = fm.getFunctions(true);
