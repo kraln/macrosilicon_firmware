@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """
 Host side of the MS2109 mailbox (XDATA 0xDE00), for both the A7 firmware
-(ms2109/eeprom) and the D7 add-on (ms2109/eeprom_d7).
+(ms2109/eeprom) and the D7 firmware (ms2109/eeprom_d7).
 
     python ms2109_mailbox.py identify
     python ms2109_mailbox.py status
     python ms2109_mailbox.py gpio
     python ms2109_mailbox.py i2c-scan
     python ms2109_mailbox.py i2c-read 0x50 0x00
+    python ms2109_mailbox.py edid [out.bin]   # EDID RAM, no firmware needed
 
-D7 units can run the add-on from RAM without touching the EEPROM, which is
-the safe way to try it first. It is gone at the next unplug:
+D7 units still on their stock EEPROM can run the mailbox from RAM without
+touching the EEPROM. It is gone at the next unplug:
 
     python ms2109_mailbox.py load       # then identify, gpio, ...
     python ms2109_mailbox.py unload     # or just unplug
@@ -26,16 +27,19 @@ import time
 from ms_hid import MSDevice, chip_name
 
 MBOX = 0xDE00            # +0 cmd, +1/+2 params, +3 status, +4.. response
-MBOX_MAGIC = 0xDE0E      # "KD": D7 add-on has initialised the mailbox
+MBOX_MAGIC = 0xDE0E      # "KD": D7 firmware has initialised the mailbox
 STATUS_DONE = 0x02
 STATUS_UNKNOWN = 0xFF
 
-# D7 add-on, see ms2109/eeprom_d7/mailbox_d7.asm
+# D7, see ms2109/eeprom_d7: the flashed firmware (firmware_d7.asm) and the
+# RAM-only mailbox for stock units (mailbox_d7.asm)
 HOOK = 0xCC00
+FW_SIGNATURE = b"kD7fw"  # firmware at HOOK + 3
 BLOB_ADDR = 0xD000
-SIGNATURE = b"kD7mb"     # blob +6
+SIGNATURE = b"kD7mb"     # RAM mailbox at BLOB_ADDR + 6
 CHAIN_OPERAND = 4        # blob +3: ljmp <stock target>
 TRAMP_PAGE = 0xD800      # RAM load only: trampoline at 0xD800 | target low
+EDID_RAM = 0xFB00        # EDID the chip serves to the HDMI source
 
 DEFAULT_BLOB = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "..", "ms2109", "eeprom_d7", "mailbox_d7.bin")
@@ -48,7 +52,10 @@ class MailboxError(Exception):
 def command(d, cmd, p0=0, p1=0, timeout=1.0):
     """Run one mailbox command; returns the 10 response bytes."""
     if d.xdata_read(MBOX) != 0:
-        raise MailboxError("mailbox busy, or no mailbox firmware running")
+        hint = (" (D7: run `load` first, or flash eeprom_image_d7.bin)"
+                if d.chip_id() == 0xD7 and not addon_running(d) else "")
+        raise MailboxError("mailbox busy, or no mailbox firmware running"
+                           + hint)
     d.xdata_write(MBOX + 3, 0)
     d.xdata_write(MBOX + 1, p0)
     d.xdata_write(MBOX + 2, p1)
@@ -77,16 +84,13 @@ def hook_target(d):
 
 
 def addon_running(d):
-    """'eeprom', 'ram' or None."""
-    target = hook_target(d)
-    if target == BLOB_ADDR:
-        where = "eeprom"
-    elif target >> 8 == TRAMP_PAGE >> 8:
-        where = "ram"
-    else:
+    """D7: 'eeprom' (our firmware is flashed), 'ram' (`load`) or None."""
+    if bytes(d.xdata_read_block(HOOK + 3, len(FW_SIGNATURE))) == FW_SIGNATURE:
+        return "eeprom"
+    if hook_target(d) >> 8 != TRAMP_PAGE >> 8:
         return None
     sig = d.xdata_read_block(BLOB_ADDR + 6, len(SIGNATURE))
-    return where if bytes(sig) == SIGNATURE else None
+    return "ram" if bytes(sig) == SIGNATURE else None
 
 
 def load(d, blob):
@@ -96,8 +100,11 @@ def load(d, blob):
     if blob[6:6 + len(SIGNATURE)] != SIGNATURE:
         raise MailboxError("blob has no signature; rebuild mailbox_d7.bin")
     where = addon_running(d)
+    if where == "eeprom":
+        raise MailboxError("the D7 firmware is flashed; the mailbox is "
+                           "already running")
     if where:
-        raise MailboxError(f"the add-on is already running (from {where})")
+        raise MailboxError("the mailbox is already loaded")
     target = hook_target(d)
     if not HOOK < target < BLOB_ADDR:
         raise MailboxError(f"unexpected stock hook target 0x{target:04X}")
@@ -121,10 +128,10 @@ def load(d, blob):
 def unload(d):
     where = addon_running(d)
     if where == "eeprom":
-        raise MailboxError("the add-on is in the EEPROM; flash your stock "
+        raise MailboxError("the D7 firmware is flashed; flash your stock "
                            "backup to remove it")
     if where != "ram":
-        raise MailboxError("the add-on is not loaded")
+        raise MailboxError("the mailbox is not loaded")
     chain = d.xdata_read_block(BLOB_ADDR + CHAIN_OPERAND, 2)
     if chain[1] != d.xdata_read(HOOK + 2):
         raise MailboxError("hook does not match the loaded add-on; unplug "
@@ -139,7 +146,7 @@ def run(d, args):
     if args.cmd == "load":
         with open(args.blob, "rb") as f:
             load(d, f.read())
-        print("Add-on running from RAM until unplugged.")
+        print("Mailbox running from RAM until unplugged.")
         resp = command(d, 0xFE)
         print(f"Identify: {bytes(resp[:6]).decode('ascii', 'replace')}")
     elif args.cmd == "unload":
@@ -172,6 +179,30 @@ def run(d, args):
         if chip == 0xD7 and not resp[1]:
             sys.exit(f"No ACK from 0x{args.addr:02X}")
         print(f"[0x{args.addr:02X}:0x{args.reg:02X}] = 0x{resp[0]:02X}")
+    elif args.cmd == "edid":
+        edid = d.xdata_read_block(EDID_RAM, 256)
+        print(describe_edid(edid))
+        if args.output:
+            with open(args.output, "wb") as f:
+                f.write(edid)
+            print(f"Saved to {args.output}")
+
+
+def describe_edid(edid):
+    if edid[:8] != b"\x00\xff\xff\xff\xff\xff\xff\x00":
+        return "EDID RAM does not hold a valid EDID header"
+    mfg = edid[8] << 8 | edid[9]
+    mfg = "".join(chr(0x40 + (mfg >> s & 0x1F)) for s in (10, 5, 0))
+    name = "?"
+    for off in range(54, 126, 18):
+        if edid[off:off + 4] == b"\x00\x00\x00\xfc":
+            name = bytes(edid[off + 5:off + 18]).split(b"\n")[0].decode(
+                "ascii", "replace").strip()
+    blocks = 1 + edid[126]
+    ok = all(sum(edid[i * 128:(i + 1) * 128]) & 0xFF == 0
+             for i in range(min(blocks, 2)))
+    return (f"EDID: {mfg} {edid[11] << 8 | edid[10]:04X} \"{name}\", "
+            f"{blocks} block(s), checksum {'OK' if ok else 'BAD'}")
 
 
 def main():
@@ -187,9 +218,12 @@ def main():
     p = sub.add_parser("i2c-read", help="read one I2C register")
     p.add_argument("addr", type=num, help="7-bit address")
     p.add_argument("reg", type=num)
-    p = sub.add_parser("load", help="D7: run the add-on from RAM")
+    p = sub.add_parser("load", help="D7 on stock EEPROM: run the mailbox "
+                       "from RAM")
     p.add_argument("--blob", default=DEFAULT_BLOB)
     sub.add_parser("unload", help="D7: restore the stock hook")
+    p = sub.add_parser("edid", help="read the EDID the chip is serving")
+    p.add_argument("output", nargs="?", help="also save it to this file")
     args = ap.parse_args()
     if (args.vid is None) != (args.pid is None):
         ap.error("--vid and --pid must be given together")

@@ -60,6 +60,46 @@ Commands passed in R7 (all via 0x7F91):
 
 Also seen: 0x01, 0x0A-0x0C, 0x0F, 0x10, 0x13, 0x16, 0x19, 0x22, 0x25-0x29.
 
+The gated commands (0x04-0x09, 0x17, 0x24) replace a built-in ROM routine
+when their `header[5]` bit is set, e.g. 0x17 replaces `0x3472`/`0x32C9`.
+The others are always called.
+
+## Mode Setup
+
+When the input or the USB format changes, the ROM runs hook 0x17 (or its
+own class selection), then 0x22, reads the class back from `C713`, and
+later runs 0x19. Stock EEPROM code uses 0x00, 0x17, 0x19 and 0x22;
+`ms2109/eeprom_d7/firmware_d7.asm` does the same things (checked against
+the stock code in a simulator). The state involved, all 16-bit big-endian:
+
+| Addr | Meaning |
+|------|---------|
+| C6FE.. | Selected USB format: C703 width, C705 height, C707 pixel clock, C709 frame rate * 100 |
+| C713 | Scaler class (0, 1, 2) |
+| C714, C716 | Scaled image width, height |
+| C71A.. | Measured input: C71A flags, C71F width, C721 height, C723 pixel clock (10 kHz), C725 frame rate * 100 |
+| C6FD | 0x40 with class 2 |
+| C73A | Set to 19000 by hook 0x00 |
+
+Hook 0x19 also writes scaler registers in `F88B-F944` and `FD3B-FD41`
+for inputs above 160 MHz and for a 1920-wide input to a 1080-line format.
+
+## Boot Sequence
+
+From the reset path (`0x3E32` onwards):
+
+1. `0x71B4` loads the EEPROM: `0x44DB` reads `length + 0x34` bytes from
+   EEPROM offset 0 to XDATA `0xCBD0` (so the code lands at `0xCC00`), then
+   `0x3997` checks the code length (at most `0x13FC`) and both checksums.
+2. Hook with R7 = 0x00.
+3. `0x67FB` -> `0x72A3`: EDID load. Reads `header[5]` from the loaded image
+   at `0xCBD5`; bit 4 set -> hook R7 = 0x08, else ROM EDID from `0x847C`.
+4. `0x2F59`: VID/PID override from the header.
+5. Hook with R7 = 0x01, then the main loop (hook R7 = 0x02 every pass).
+
+So the image, including anything past offset 0x400, is in RAM before the
+EDID and VID/PID steps use it.
+
 ## ROM Routines
 
 Matched against the A7 ROM by instruction sequence.
